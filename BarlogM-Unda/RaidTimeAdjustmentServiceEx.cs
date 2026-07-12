@@ -94,10 +94,9 @@ public class RaidTimeAdjustmentServiceEx(
         var originalPmcWaveCount = GetBossPmcSpawnCount(mapBase.BossLocationSpawn);
         var skip = (int)(originalPmcWaveCount * 0.5);
 
-        logger.Warning($"[Unda] remove {skip} PMC waves");
         if (_modConfig.Debug)
         {
-            logger.LogWithColor($"[Unda] remove {skip} PMC waves", LogTextColor.Black);
+            logger.LogWithColor($"[Unda] original: {originalPmcWaveCount} removed: {skip} PMC waves", LogTextColor.Blue);
         }
 
         foreach (var spawn in mapBase.BossLocationSpawn)

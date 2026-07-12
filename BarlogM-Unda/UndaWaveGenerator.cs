@@ -1,6 +1,7 @@
 using System.Text.Json;
 using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.Generators;
+using SPTarkov.Server.Core.Helpers;
 using SPTarkov.Server.Core.Models.Eft.Common;
 using SPTarkov.Server.Core.Models.Logging;
 using SPTarkov.Server.Core.Models.Spt.Config;
@@ -13,17 +14,19 @@ using SPTarkov.Server.Core.Utils.Json;
 namespace BarlogM_Unda;
 
 [Injectable(InjectionType.Scoped, typeof(PmcWaveGenerator))]
-public class PmcWaveGeneratorEx(
-    ISptLogger<PmcWaveGeneratorEx> logger,
+public class UndaWaveGenerator(
+    ISptLogger<UndaWaveGenerator> logger,
     DatabaseService databaseService,
     ConfigServer configServer,
     RandomUtil randomUtil,
+    WeatherHelper weatherHelper,
     Data data,
     ModData modData
 ) : PmcWaveGenerator(databaseService, configServer)
 {
     private readonly ModConfig _modConfig = modData.ModConfig;
     private readonly BotConfig botConfig = configServer.GetConfig<BotConfig>();
+
     private readonly LocationConfig locationConfig =
         configServer.GetConfig<LocationConfig>();
 
@@ -47,10 +50,21 @@ public class PmcWaveGeneratorEx(
         DeleteAllPmcBosses(location);
         var locationId = location.Id.ToLower();
         DeleteAllCustomWaves(locationId);
-        if (!randomUtil.GetChance100(_modConfig.ChanceForQuietRaid))
+
+        var isNightRaid = modData.IsNightRaid && locationId is not ("laboratory" or "labyrinth");
+        
+        if (_modConfig.Debug && isNightRaid)
+        {
+            logger.LogWithColor(
+                $"[Unda] night quiet raid",
+                LogTextColor.Blue);
+        }
+
+        if (!isNightRaid && !randomUtil.GetChance100(_modConfig.ChanceForQuietRaid))
         {
             UpdateMaxBotsAmount(location);
         }
+
         GeneratePmcBossWaves(location);
         ReplaceScavWaves(location);
     }
@@ -143,6 +157,7 @@ public class PmcWaveGeneratorEx(
             logger.LogWithColor(
                 $"[Unda] {locationId}.BotMax: {maxBots} -> {newMaxBotsValue}", LogTextColor.Blue);
         }
+
         return newMaxBotsValue;
     }
 
@@ -150,7 +165,7 @@ public class PmcWaveGeneratorEx(
     {
         var locationId = location.Id.ToLower();
         if (locationId is "labyrinth") return;
-       
+
         /*
         var minPlayers = data.GeneralLocationInfo[locationId].MinPlayers;
         var maxPlayers = data.GeneralLocationInfo[locationId].MaxPlayers;
@@ -186,7 +201,7 @@ public class PmcWaveGeneratorEx(
 
         var groups =
             SplitMaxAmountIntoGroups(maxPmcAmount, _modConfig.MaxPmcGroupSize);
-        
+
         foreach (var group in groups)
         {
             location.BossLocationSpawn.Add(GeneratePmcAsBoss(group, _modConfig.PmcBotDifficulty));
@@ -195,7 +210,8 @@ public class PmcWaveGeneratorEx(
         if (_modConfig.Debug)
         {
             logger.LogWithColor(
-                $"[Unda] location.BossLocationSpawn '{locationId}': {JsonSerializer.Serialize(location.BossLocationSpawn)}", LogTextColor.Blue);
+                $"[Unda] location.BossLocationSpawn '{locationId}': {JsonSerializer.Serialize(location.BossLocationSpawn)}",
+                LogTextColor.Blue);
         }
     }
 
@@ -415,7 +431,7 @@ public class PmcWaveGeneratorEx(
         var middleWaveTimeMin = (int)Math.Ceiling(lastWaveTimeMin / 2.0);
 
         var difficulty = randomUtil.GetBool() ? "normal" : "hard";
-        
+
         CreateAssaultWaves(groupsByZones, location, difficulty, firstWaveTimeMin,
             ref currentWaveNumber);
         CreateAssaultWaves(groupsByZones, location, difficulty, middleWaveTimeMin,

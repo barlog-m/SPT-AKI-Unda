@@ -11,6 +11,7 @@ public class ModData
 {
     public readonly ModConfig ModConfig;
     public readonly string PathToMod;
+    public bool IsNightRaid;
 
     public ModData(ISptLogger<ModData> logger, ModHelper modHelper, JsonUtil jsonUtil)
     {
