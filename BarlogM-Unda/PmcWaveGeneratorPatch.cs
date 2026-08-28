@@ -1,66 +1,87 @@
+using System.Reflection;
 using System.Text.Json;
+using SPTarkov.Common.Models.Logging;
 using SPTarkov.DI.Annotations;
+using SPTarkov.Reflection.Patching;
 using SPTarkov.Server.Core.Generators;
-using SPTarkov.Server.Core.Helpers;
 using SPTarkov.Server.Core.Models.Eft.Common;
-using SPTarkov.Server.Core.Models.Logging;
 using SPTarkov.Server.Core.Models.Spt.Config;
-using SPTarkov.Server.Core.Models.Utils;
-using SPTarkov.Server.Core.Servers;
-using SPTarkov.Server.Core.Services;
 using SPTarkov.Server.Core.Utils;
 using SPTarkov.Server.Core.Utils.Json;
 
 namespace BarlogM_Unda;
 
-[Injectable(InjectionType.Scoped, typeof(PmcWaveGenerator))]
-public class UndaWaveGenerator(
-    ISptLogger<UndaWaveGenerator> logger,
-    DatabaseService databaseService,
-    ConfigServer configServer,
-    RandomUtil randomUtil,
-    WeatherHelper weatherHelper,
-    Data data,
-    ModData modData
-) : PmcWaveGenerator(databaseService, configServer)
+[Injectable]
+public class PmcWaveGeneratorPatch : AbstractPatch
 {
-    private readonly ModConfig _modConfig = modData.ModConfig;
-    private readonly BotConfig botConfig = configServer.GetConfig<BotConfig>();
+    private static BotConfig botConfig = default!;
+    private static LocationConfig locationConfig = default!;
+    private static RandomUtil randomUtil = default!;
+    private static ISptLogger<PmcWaveGeneratorPatch> logger = default!;
+    private static Data data = default!;
+    private static Config config = default!;
 
-    private readonly LocationConfig locationConfig =
-        configServer.GetConfig<LocationConfig>();
-
-    public override void ApplyWaveChangesToAllMaps()
+    public PmcWaveGeneratorPatch(
+        BotConfig botConfig,
+        LocationConfig locationConfig,
+        RandomUtil randomUtil,
+        ISptLogger<PmcWaveGeneratorPatch> logger,
+        Data data,
+        ConfigProvider configProvider
+    )
     {
-        foreach (var locationId in Data.AllMaps)
+        PmcWaveGeneratorPatch.botConfig = botConfig;
+        PmcWaveGeneratorPatch.locationConfig = locationConfig;
+        PmcWaveGeneratorPatch.randomUtil = randomUtil;
+        PmcWaveGeneratorPatch.logger = logger;
+        PmcWaveGeneratorPatch.data = data;
+        config = configProvider.config;
+    }
+    
+    protected override MethodBase GetTargetMethod()
+    {
+        /*
+        return AccessTools.Method(
+            typeof(PmcWaveGenerator),
+            "ApplyWaveChangesToMap",
+            new[] { typeof(LocationBase) }
+        );
+        */
+        
+        return typeof(PmcWaveGenerator).GetMethod(nameof(PmcWaveGenerator.ApplyWaveChangesToMap)) ?? throw new InvalidOperationException("Could not find target method!");
+    }
+
+    [PatchPrefix]
+    public static bool Prefix(LocationBase location)
+    {
+        if (config.Debug)
         {
-            var location = databaseService.GetLocation(locationId)!;
-            ApplyWaveChangesToMap(location.Base);
+            logger.LogWithColor(
+                "[Unda] path for PmcWaveGenerator.ApplyWaveChangesToMap",
+                Spectre.Console.Color.Yellow);
         }
-    }
 
-    public override void ApplyWaveChangesToMapByName(string name)
-    {
-        var location = databaseService.GetLocation(name)!;
-        ApplyWaveChangesToMap(location.Base);
-    }
+        ApplyWaveChangesToMap(location);
 
-    public override void ApplyWaveChangesToMap(LocationBase location)
+        return false;
+    }
+    
+    static void ApplyWaveChangesToMap(LocationBase location)
     {
         DeleteAllPmcBosses(location);
         var locationId = location.Id.ToLower();
         DeleteAllCustomWaves(locationId);
 
-        var isNightRaid = modData.IsNightRaid && locationId is not ("laboratory" or "labyrinth");
-        
-        if (_modConfig.Debug && isNightRaid)
+        var isNightRaid = data.IsNightRaid && locationId is not ("laboratory" or "labyrinth");
+
+        if (config.Debug && isNightRaid)
         {
             logger.LogWithColor(
                 $"[Unda] night quiet raid",
-                LogTextColor.Blue);
+                Spectre.Console.Color.Blue);
         }
 
-        if (!isNightRaid && !randomUtil.GetChance100(_modConfig.ChanceForQuietRaid))
+        if (!isNightRaid && !randomUtil.GetChance100(config.ChanceForQuietRaid))
         {
             UpdateMaxBotsAmount(location);
         }
@@ -69,7 +90,7 @@ public class UndaWaveGenerator(
         ReplaceScavWaves(location);
     }
 
-    void DeleteAllPmcBosses(LocationBase location)
+    static void DeleteAllPmcBosses(LocationBase location)
     {
         location.BossLocationSpawn = location.BossLocationSpawn
             .Where(bossLocationSpawn =>
@@ -77,28 +98,28 @@ public class UndaWaveGenerator(
                 bossLocationSpawn.BossName != "pmcUSEC")
             .ToList();
 
-        if (_modConfig.Debug)
+        if (config.Debug)
         {
             logger.LogWithColor(
                 $"[Unda] delete all pmc bosses on location '{location.Name}' location.BossLocationSpawn: {JsonSerializer.Serialize(location.BossLocationSpawn)}",
-                LogTextColor.Blue);
+                Spectre.Console.Color.Blue);
         }
     }
 
-    void DeleteAllCustomWaves(string locationName)
+    static void DeleteAllCustomWaves(string locationName)
     {
         locationConfig.CustomWaves!.Boss[locationName] = [];
         locationConfig.CustomWaves.Normal[locationName] = [];
 
-        if (_modConfig.Debug)
+        if (config.Debug)
         {
             logger.LogWithColor(
                 $"[Unda] after delete locationConfig.customWaves.boss: {JsonSerializer.Serialize(locationConfig.CustomWaves.Boss)}",
-                LogTextColor.Blue);
+                Spectre.Console.Color.Blue);
         }
     }
 
-    private void UpdateMaxBotsAmount(LocationBase location)
+    static void UpdateMaxBotsAmount(LocationBase location)
     {
         var locationId = location.Id.ToLower();
         var generalLocationInfo = data.GeneralLocationInfo[locationId];
@@ -119,7 +140,7 @@ public class UndaWaveGenerator(
         }
     }
 
-    int IncreaseMaxBotsAmountForLargeLocation(
+    static int IncreaseMaxBotsAmountForLargeLocation(
         LocationBase location,
         int maxBots,
         int minPlayers)
@@ -130,7 +151,7 @@ public class UndaWaveGenerator(
         return IncreaseMaxBotsAmountForLocation(location, maxBots, term);
     }
 
-    int IncreaseMaxBotsAmountForSmallLocation(
+    static int IncreaseMaxBotsAmountForSmallLocation(
         LocationBase location,
         int maxBots,
         int maxPlayers)
@@ -141,7 +162,7 @@ public class UndaWaveGenerator(
         return IncreaseMaxBotsAmountForLocation(location, maxBots, term);
     }
 
-    int IncreaseMaxBotsAmountForLocation(
+    static int IncreaseMaxBotsAmountForLocation(
         LocationBase location,
         int maxBots,
         int term)
@@ -152,16 +173,16 @@ public class UndaWaveGenerator(
         var locationId = location.Id.ToLower();
         botConfig.MaxBotCap[locationId] = newMaxBotsValue;
 
-        if (_modConfig.Debug)
+        if (config.Debug)
         {
             logger.LogWithColor(
-                $"[Unda] {locationId}.BotMax: {maxBots} -> {newMaxBotsValue}", LogTextColor.Blue);
+                $"[Unda] {locationId}.BotMax: {maxBots} -> {newMaxBotsValue}", Spectre.Console.Color.Blue);
         }
 
         return newMaxBotsValue;
     }
 
-    void GeneratePmcBossWaves(LocationBase location)
+    static void GeneratePmcBossWaves(LocationBase location)
     {
         var locationId = location.Id.ToLower();
         if (locationId is "labyrinth") return;
@@ -183,7 +204,7 @@ public class UndaWaveGenerator(
         if (_modConfig.Debug)
         {
             logger.LogWithColor(
-                $"[Unda] '{locationId}' PMC groups {JsonSerializer.Serialize(groupsByZones)}", LogTextColor.Blue);
+                $"[Unda] '{locationId}' PMC groups {JsonSerializer.Serialize(groupsByZones)}", Spectre.Console.Color.Blue);
         }
 
         foreach (var groupByZone in groupsByZones)
@@ -200,22 +221,22 @@ public class UndaWaveGenerator(
         }
 
         var groups =
-            SplitMaxAmountIntoGroups(maxPmcAmount, _modConfig.MaxPmcGroupSize);
+            SplitMaxAmountIntoGroups(maxPmcAmount, config.MaxPmcGroupSize);
 
         foreach (var group in groups)
         {
-            location.BossLocationSpawn.Add(GeneratePmcAsBoss(group, _modConfig.PmcBotDifficulty));
+            location.BossLocationSpawn.Add(GeneratePmcAsBoss(group, config.PmcBotDifficulty));
         }
 
-        if (_modConfig.Debug)
+        if (config.Debug)
         {
             logger.LogWithColor(
                 $"[Unda] location.BossLocationSpawn '{locationId}': {JsonSerializer.Serialize(location.BossLocationSpawn)}",
-                LogTextColor.Blue);
+                Spectre.Console.Color.Blue);
         }
     }
 
-    List<ZoneGroupSize> SeparateGroupsByZones(List<string> zones,
+    static List<ZoneGroupSize> SeparateGroupsByZones(List<string> zones,
         List<int> groups)
     {
         var shuffledZones = ShuffleZonesArray(zones);
@@ -239,7 +260,7 @@ public class UndaWaveGenerator(
         return result;
     }
 
-    BossLocationSpawn GeneratePmcAsBoss(int groupSize, string difficulty)
+    static BossLocationSpawn GeneratePmcAsBoss(int groupSize, string difficulty)
     {
         var supports = new List<BossSupport>();
         var escortAmount = "0";
@@ -284,7 +305,7 @@ public class UndaWaveGenerator(
         };
     }
 
-    List<int> SplitMaxAmountIntoGroups(int maxAmount, int maxGroupSize)
+    static List<int> SplitMaxAmountIntoGroups(int maxAmount, int maxGroupSize)
     {
         var result = new List<int>();
         var remainingAmount = maxAmount;
@@ -307,12 +328,12 @@ public class UndaWaveGenerator(
         return result;
     }
 
-    List<string> ShuffleZonesArray(List<string> array)
+    static List<string> ShuffleZonesArray(List<string> array)
     {
         return randomUtil.Shuffle(array);
     }
 
-    void ReplaceScavWaves(LocationBase location)
+    static void ReplaceScavWaves(LocationBase location)
     {
         var locationId = location.Id.ToLower();
 
@@ -358,7 +379,7 @@ public class UndaWaveGenerator(
         int maxScavGroupSize =
             locationId == "tarkovstreets"
                 ? 3
-                : _modConfig.MaxScavGroupSize;
+                : config.MaxScavGroupSize;
 
         GenerateAssaultWaves(
             location,
@@ -368,20 +389,20 @@ public class UndaWaveGenerator(
             maxScavGroupSize,
             currentWaveNumber);
 
-        if (_modConfig.Debug)
+        if (config.Debug)
         {
             logger.LogWithColor(
                 $"[Unda] {locationId}.waves: {JsonSerializer.Serialize(location.Waves)}",
-                LogTextColor.Blue);
+                Spectre.Console.Color.Blue);
         }
     }
 
-    void CleanWaves(LocationBase locationBase)
+    static void CleanWaves(LocationBase locationBase)
     {
         locationBase.Waves.Clear();
     }
 
-    int GenerateMarksmanWaves(
+    static int GenerateMarksmanWaves(
         LocationBase locationBase,
         HashSet<string> zones,
         int maxGroupSize)
@@ -406,7 +427,7 @@ public class UndaWaveGenerator(
         return num;
     }
 
-    void GenerateAssaultWaves(
+    static void GenerateAssaultWaves(
         LocationBase location,
         List<string> zones,
         int escapeTimeLimit,
@@ -419,11 +440,11 @@ public class UndaWaveGenerator(
         var groupsByZones =
             SeparateGroupsByZones(zones, groups);
 
-        if (_modConfig.Debug)
+        if (config.Debug)
         {
             logger.LogWithColor(
                 $"[Unda] '{location.Id.ToLowerInvariant()}' scav groups {JsonSerializer.Serialize(groupsByZones)}",
-                LogTextColor.Blue);
+                Spectre.Console.Color.Blue);
         }
 
         var firstWaveTimeMin = 60;
@@ -440,14 +461,14 @@ public class UndaWaveGenerator(
             ref currentWaveNumber);
     }
 
-    void CreateAssaultWaves(
+    static void CreateAssaultWaves(
         List<ZoneGroupSize> groupsByZones,
         LocationBase locationBase,
         string difficulty,
         int timeMin,
         ref int currentWaveNumber)
     {
-        const int minGroupSize = 1;
+        const int MIN_GROUP_SIZE = 1;
         var timeMax = timeMin + 120;
 
         foreach (var zoneByGroup in groupsByZones)
@@ -457,7 +478,7 @@ public class UndaWaveGenerator(
                 zoneByGroup.ZoneName,
                 difficulty,
                 currentWaveNumber++,
-                minGroupSize,
+                MIN_GROUP_SIZE,
                 zoneByGroup.GroupSize,
                 timeMin,
                 timeMax);
@@ -465,7 +486,7 @@ public class UndaWaveGenerator(
         }
     }
 
-    Wave GenerateWave(
+    static Wave GenerateWave(
         WildSpawnType botType,
         string zoneName,
         string difficulty,

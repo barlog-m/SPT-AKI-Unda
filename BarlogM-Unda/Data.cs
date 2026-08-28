@@ -1,24 +1,20 @@
 using System.Collections.Frozen;
 using System.Text.Json;
+using SPTarkov.Common.Models.Logging;
 using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.DI;
 using SPTarkov.Server.Core.Models.Eft.Common;
-using SPTarkov.Server.Core.Models.Logging;
 using SPTarkov.Server.Core.Models.Spt.Config;
-using SPTarkov.Server.Core.Models.Utils;
-using SPTarkov.Server.Core.Servers;
-using SPTarkov.Server.Core.Services;
-using SPTarkov.Server.Core.Utils;
+using SPTarkov.Server.Core.Models.Spt.Tables;
 
 namespace BarlogM_Unda;
 
-[Injectable(InjectionType.Singleton, TypePriority = OnLoadOrder.PostSptModLoader + 1)]
+[Injectable(InjectionType.Singleton, TypePriority = OnLoadOrder.PostLoad + 1)]
 public class Data(
     ISptLogger<Data> logger,
-    DatabaseService databaseService,
-    ConfigServer configServer,
-    RandomUtil randomUtil,
-    ModData modData
+    LocationTable locationTable,
+    BotConfig botConfig,
+    ConfigProvider configProvider
 ) : IOnLoad
 {
     public static readonly FrozenSet<string> AllMaps =
@@ -51,22 +47,24 @@ public class Data(
 
     static readonly string WOODS_MARKSMAN_ZONE = "ZoneHighRocks";
     
-    private readonly ModConfig _modConfig = modData.ModConfig;
-    private readonly BotConfig botConfig = configServer.GetConfig<BotConfig>();
     public readonly Dictionary<string, GeneralLocationInfo>
         GeneralLocationInfo = new();
+    
+    public bool IsNightRaid;
 
-    public Task OnLoad()
+    private Config config = configProvider.config;
+
+    public Task OnLoadAsync(CancellationToken cancellationToken)
     {
         FillInitialData();
         return Task.CompletedTask;
     }
 
-    private void FillInitialData()
+    public void FillInitialData()
     {
         foreach (var locationId in AllMaps)
         {
-            var location = databaseService.GetLocation(locationId);
+            var location = locationTable.GetLocation(locationId);
 
             var marksmanZones = GetAllMarksmanSpawnZones(location.Base);
 
@@ -98,11 +96,11 @@ public class Data(
             };
         }
 
-        if (_modConfig.Debug)
+        if (config.Debug)
         {
             logger.LogWithColor(
                 $"[Unda] generalLocationInfo: {JsonSerializer.Serialize(GeneralLocationInfo)}",
-                LogTextColor.Blue);
+                Spectre.Console.Color.Blue);
         }
     }
 

@@ -15,7 +15,7 @@ public class RaidConfigurationRouter(
         [
             new RouteAction<GetRaidConfigurationRequestData>(
                 "/client/raid/configuration",
-                async (url, info, sessionID, output) => await updateRaidConfigurationCallback.UpdateRaidConfiguration(url, info, sessionID)
+                async (url, info, sessionID, output, cancellationToken) => await updateRaidConfigurationCallback.UpdateRaidConfiguration(url, info, sessionID)
             ),
         ]
     )
